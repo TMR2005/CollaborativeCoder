@@ -28,14 +28,23 @@ mongoose.connect(process.env.MONGO_URL)
   .then(() => console.log('🍃 MongoDB Connected'))
   .catch(err => console.error(err));
 
+const userSocketMap = {};
+
+function getAllConnectedClients(roomId) {
+    return Array.from(io.sockets.adapter.rooms.get(roomId) || []).map((socketId) => {
+        return {
+            socketId,
+            username: userSocketMap[socketId],
+        };
+    });
+}
+
 sub.subscribe('job_results'); 
 
 sub.on('message', (channel, message) => {
     if (channel === 'job_results') {
         const { roomId, output, status } = JSON.parse(message);
-        
         console.log(`📡 Broadcasting result to Room: ${roomId}`);
-        
         io.to(roomId).emit('code_result', { output, status });
     }
 });
@@ -43,18 +52,48 @@ sub.on('message', (channel, message) => {
 io.on('connection', (socket) => {
     console.log(`User Connected: ${socket.id}`);
 
-    socket.on('join_room', (roomId) => {
+    socket.on('join_room', ({ roomId, username }) => {
+        userSocketMap[socket.id] = username;
         socket.join(roomId);
-        console.log(`User ${socket.id} joined room: ${roomId}`);
+        
+        const clients = getAllConnectedClients(roomId);
+        
+        io.to(roomId).emit('joined', {
+            clients,
+            username,
+            socketId: socket.id,
+        });
+
+        console.log(`${username} joined room: ${roomId}`);
     });
 
-    socket.on('code_change', (data) => {
-        const { roomId, code } = data;
+    socket.on('code_change', ({ roomId, code }) => {
         socket.to(roomId).emit('code_update', code);
     });
 
-    socket.on('disconnect', () => {
-        console.log('User Disconnected', socket.id);
+    socket.on('cursor_activity', ({ roomId, cursor, selection, username }) => {
+        socket.to(roomId).emit('remote_cursor_update', {
+            socketId: socket.id,
+            username,
+            cursor,
+            selection
+        });
+    });
+
+    socket.on('send_message', ({ roomId, message, username, time }) => {
+        io.to(roomId).emit('receive_message', { message, username, time });
+    });
+
+    socket.on('disconnecting', () => {
+        const rooms = [...socket.rooms];
+        rooms.forEach((roomId) => {
+            socket.in(roomId).emit('disconnected', {
+                socketId: socket.id,
+                username: userSocketMap[socket.id],
+            });
+        });
+        delete userSocketMap[socket.id];
+        socket.leave();
     });
 });
 
@@ -106,9 +145,9 @@ app.get('/room/:roomId', async (req, res) => {
     } catch (error) {
       res.status(500).json({ error: "DB Error" });
     }
-  });
+});
 
-  app.post('/save', async (req, res) => {
+app.post('/save', async (req, res) => {
     try {
       const { roomId, code, language } = req.body;
       await Room.findOneAndUpdate(
@@ -120,11 +159,9 @@ app.get('/room/:roomId', async (req, res) => {
     } catch (error) {
       res.status(500).json({ error: "Save Error" });
     }
-  });
+});
 
 const authRoutes = require('./auth');
-
-
 app.use('/auth', authRoutes); 
 
 const User = require('./models/User'); 
@@ -156,5 +193,4 @@ app.get('/user-rooms/:userId', async (req, res) => {
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
-
 });

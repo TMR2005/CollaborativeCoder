@@ -1,11 +1,12 @@
-// server/auth.js
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const User = require('./models/User');
+const dotenv = require('dotenv');
+dotenv.config();
 
-const JWT_SECRET = "hacker-pls-dont-steal"; 
+const JWT_SECRET = process.env.JWT_SECRET; 
 
 router.post('/register', async (req, res) => {
     try {

@@ -1,89 +1,34 @@
 const Redis = require('ioredis');
-const fs = require('fs');
-const path = require('path');
-const { exec } = require('child_process');
+const axios = require('axios');
+const dotenv = require('dotenv');
+dotenv.config();
 
-const redis = new Redis();
-
-// ... imports (Redis, fs, path, exec) ...
-
-function runCodeInDocker(jobId, sourceCode, language, input) {
-    return new Promise((resolve, reject) => {
-        const tempDir = path.join(__dirname, 'temp');
-        
-        // 1. Determine file extension and Docker image based on language
-        let fileExtension, image, runCommand;
-
-        switch (language) {
-            case 'python':
-                fileExtension = 'py';
-                image = 'python:3.9-slim';
-                // Python just runs the file
-                runCommand = `python3 /app/${jobId}.py < /app/${jobId}.txt`;
-                break;
-            
-            case 'cpp':
-                fileExtension = 'cpp';
-                image = 'gcc:latest';
-                // C++: Compile first (&&) then Run
-                // -o /app/out.exe names the executable
-                runCommand = `g++ /app/${jobId}.cpp -o /app/out.exe && /app/out.exe < /app/${jobId}.txt`;
-                break;
-
-            default:
-                return resolve("Error: Unsupported Language");
-        }
-
-        const fileName = `${jobId}.${fileExtension}`;
-        const inputFile = `${jobId}.txt`;
-
-        const filePath = path.join(tempDir, fileName);
-        const inputPath = path.join(tempDir, inputFile);
-
-        // 2. Write files
-        fs.writeFileSync(filePath, sourceCode);
-        fs.writeFileSync(inputPath, input);
-
-        const containerPath = '/app';
-        const mountPath = path.join(process.cwd(), 'temp');
-
-        // 3. Construct the Docker Command
-        // We wrap everything in /bin/sh -c so we can use && and < operators
-        const dockerCmd = `docker run --rm -v "${mountPath}:${containerPath}" ${image} /bin/sh -c "${runCommand}"`;
-
-        console.log(`Running [${language}]: ${dockerCmd}`);
-
-        exec(dockerCmd, { timeout: 10000 }, (error, stdout, stderr) => { // Increased timeout for compilation
-            // Cleanup
-            try {
-                fs.unlinkSync(filePath);
-                fs.unlinkSync(inputPath);
-            } catch (e) {}
-
-            if (error) {
-                if (error.killed) return resolve("Error: Time Limit Exceeded");
-                // For C++, stderr often contains the compilation errors, which the user needs to see!
-                return resolve(stderr || error.message);
-            }
-            resolve(stdout);
-        });
-    });
-}
-
-// ... rest of the file (processSubmission, startWorker) ...
+// OLD: const redis = new Redis();
+// NEW:
+const REDIS_URL = process.env.REDIS_URL;
+// Connect to Redis
+// (Later we will use process.env.REDIS_URL for production)
+const redis = new Redis(REDIS_URL);
 
 async function processSubmission(submission) {
-    const { jobId, sourceCode, language, roomId,input } = JSON.parse(submission);
+    const { jobId, sourceCode, language, roomId, input } = JSON.parse(submission);
 
-    console.log(`Processing Job: ${jobId} for Room: ${roomId}`);
+    console.log(`Processing Job: ${jobId}`);
 
+    let output;
+    
+    try {
+        output = await runCodeWithPiston(sourceCode, language, input);
+    } catch (error) {
+        console.error("Execution Error:", error);
+        output = "Error executing code.";
+    }
 
-    const output = await runCodeInDocker(jobId, sourceCode, language, input);
-
+    // Publish Result
     const result = JSON.stringify({
         jobId,
         roomId,
-        output: output, 
+        output,
         status: "success"
     });
 
@@ -91,13 +36,68 @@ async function processSubmission(submission) {
     console.log(`Finished Job: ${jobId}`);
 }
 
+async function runCodeWithPiston(sourceCode, language, input) {
+    // 1. Map our simple language names to Piston's specific versions
+    // You can check supported versions here: https://emkc.org/api/v2/piston/runtimes
+    const languageMap = {
+        'python': { language: 'python', version: '3.10.0' },
+        'cpp': { language: 'c++', version: '10.2.0' },
+        'javascript': { language: 'javascript', version: '18.15.0' } // Bonus: JS Support
+    };
+
+    const target = languageMap[language];
+    
+    if (!target) {
+        return "Error: Unsupported Language";
+    }
+
+    // 2. Call the API
+    try {
+        const response = await axios.post('https://emkc.org/api/v2/piston/execute', {
+            language: target.language,
+            version: target.version,
+            files: [
+                {
+                    content: sourceCode
+                }
+            ],
+            stdin: input || "", // Pass the user input here
+            args: [],
+            compile_timeout: 10000,
+            run_timeout: 3000,
+            memory_limit: 128 * 1024 * 1024, // 128MB
+        });
+
+        const { run, compile } = response.data;
+
+        // 3. Handle Compilation Errors (mostly for C++)
+        if (compile && compile.stderr) {
+            return `Compilation Error:\n${compile.stderr}`;
+        }
+
+        // 4. Handle Runtime Output/Errors
+        // Piston separates stdout (success) and stderr (errors)
+        if (run.stderr) {
+            return run.stderr;
+        }
+        
+        return run.stdout;
+
+    } catch (error) {
+        console.error("Piston API Error:", error.message);
+        return "Error: Failed to connect to execution engine.";
+    }
+}
+
 async function startWorker() {
     console.log("Worker started. Listening for jobs...");
+
     while (true) {
         try {
             const response = await redis.blpop('submission_queue', 0);
             if (response) {
-                await processSubmission(response[1]);
+                const submission = response[1];
+                await processSubmission(submission);
             }
         } catch (error) {
             console.error("Worker Error:", error);

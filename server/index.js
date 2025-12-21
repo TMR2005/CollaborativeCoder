@@ -1,3 +1,4 @@
+require('./worker'); 
 const express = require('express');
 const cors = require('cors');
 const Redis = require('ioredis');
@@ -6,11 +7,13 @@ const http = require('http');
 const { Server } = require('socket.io');
 const mongoose = require('mongoose'); 
 const Room = require('./models/Room'); 
-
+const dotenv = require('dotenv');
+dotenv.config();
 const app = express();
 
-const redis = new Redis(); 
-const sub = new Redis();   
+const REDIS_URL = process.env.REDIS_URL;
+const redis = new Redis(REDIS_URL);
+const sub = new Redis(REDIS_URL); 
 
 const server = http.createServer(app);
 
@@ -21,7 +24,7 @@ const io = new Server(server, {
     }
 });
 
-mongoose.connect('mongodb://localhost:27017/collaborative-judge')
+mongoose.connect(process.env.MONGO_URL)
   .then(() => console.log('🍃 MongoDB Connected'))
   .catch(err => console.error(err));
 

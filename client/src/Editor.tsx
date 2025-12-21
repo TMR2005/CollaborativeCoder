@@ -34,16 +34,16 @@ function Editor() {
   useEffect(() => {
     if (!roomId) return;
 
-    socket = io('http://localhost:5000');
+    socket = io('https://collaborativecoderapi.onrender.com');
     const userId = localStorage.getItem('userId');
 
     if (userId) {
-      axios.post('http://localhost:5000/verify-room', { roomId, userId });
+      axios.post('https://collaborativecoderapi.onrender.com/verify-room', { roomId, userId });
     }
 
     const fetchRoomData = async () => {
       try {
-        const response = await axios.get<RoomData>(`http://localhost:5000/room/${roomId}`);
+        const response = await axios.get<RoomData>(`https://collaborativecoderapi.onrender.com/room/${roomId}`);
         if (response.data) {
           setCode(response.data.code || '');
           setLanguage(response.data.language || 'python');
@@ -84,7 +84,7 @@ function Editor() {
     if (!roomId) return;
     setSaving(true);
     try {
-      await axios.post('http://localhost:5000/save', {
+      await axios.post('https://collaborativecoderapi.onrender.com/save', {
         roomId,
         code,
         language
@@ -104,7 +104,7 @@ function Editor() {
 
     try {
       await saveCode();
-      await axios.post('http://localhost:5000/submit', {
+      await axios.post('https://collaborativecoderapi.onrender.com/submit', {
         roomId,
         sourceCode: code,
         language: language,

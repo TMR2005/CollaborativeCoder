@@ -17,7 +17,7 @@ function Login() {
     setLoading(true);
 
     try {
-      const res = await axios.post<AuthResponse>('http://localhost:5000/auth/login', {
+      const res = await axios.post<AuthResponse>('https://collaborativecoderapi.onrender.com/auth/login', {
         email,
         password
       });

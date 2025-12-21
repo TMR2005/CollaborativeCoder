@@ -15,7 +15,7 @@ function Home() {
 
   useEffect(() => {
     if (userId) {
-      axios.get<UserRoomsResponse>(`http://localhost:5000/user-rooms/${userId}`)
+      axios.get<UserRoomsResponse>(`https://collaborativecoderapi.onrender.com/user-rooms/${userId}`)
         .then(res => setMyRooms(res.data.rooms))
         .catch(err => console.error(err));
     }

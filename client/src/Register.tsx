@@ -17,7 +17,7 @@ function Register() {
     setLoading(true);
 
     try {
-      await axios.post('http://localhost:5000/auth/register', {
+      await axios.post('https://collaborativecoderapi.onrender.com/auth/register', {
         username,
         email,
         password

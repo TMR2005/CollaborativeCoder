@@ -35,20 +35,21 @@ This platform provides a **synchronized, stateful, and executable** environment:
 
 ```mermaid
 graph TD
-    Client_A[User A (React)] <-->|WebSocket| LB[Load Balancer]
-    Client_B[User B (React)] <-->|WebSocket| LB
-    LB <--> Server[Node.js Server]
-    
-    subgraph Data Layer
-        Server <-->|Pub/Sub & Caching| Redis[(Redis)]
-        Server <-->|Persistence| Mongo[(MongoDB)]
+    A[User A - React Client] <-->|WebSocket| LB[Load Balancer]
+    B[User B - React Client] <-->|WebSocket| LB
+    LB --> S[Node.js Server]
+
+    subgraph Data_Layer[Data Layer]
+        S <-->|Cache and PubSub| R[(Redis)]
+        S --> M[(MongoDB)]
     end
-    
-    subgraph Execution Layer
-        Server --Push Job--> RedisQueue[Redis Job Queue]
-        Worker[Worker Service] --Pop Job--> RedisQueue
-        Worker --Pub Result--> Redis
+
+    subgraph Execution_Layer[Execution Layer]
+        S --> Q[Redis Job Queue]
+        W[Worker Service] --> Q
+        W --> R
     end
+
 ```
 ### 1. Synchronization Strategy: Why no CRDTs?
 **Decision:** We chose **WebSocket Broadcasts with "Last-Write-Wins" (LWW)** over Operational Transformation (OT) or Conflict-Free Replicated Data Types (CRDTs).

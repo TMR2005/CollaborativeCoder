@@ -2,8 +2,15 @@
 
 A full-stack, real-time collaborative code editor that allows multiple users to edit, run, and debug code simultaneously in a shared environment. Designed for technical interviews, pair programming, and competitive coding.
 
-![Project Status](https://img.shields.io/badge/status-active-success)
 ![License](https://img.shields.io/badge/license-MIT-blue)
+
+
+[![Live Demo](https://img.shields.io/badge/demo-online-green.svg)](https://your-app-name.vercel.app) 
+![Project Status](https://img.shields.io/badge/status-active-success)
+
+> **Try it out here:** (https://collaborativecoder.vercel.app/)
+
+A full-stack, real-time collaborative code editor...
 
 ## 🧐 The Problem
 

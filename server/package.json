@@ -2,9 +2,6 @@
   "name": "server",
   "version": "1.0.0",
   "main": "index.js",
-  "engines": {
-    "node": "18.x"
-  },
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js"
@@ -24,7 +21,7 @@
     "mongodb": "^7.0.0",
     "mongoose": "^9.0.2",
     "socket.io": "^4.8.1",
-    "uuid": "^8.3.2",
+    "uuid": "^13.0.0",
     "ws": "^8.18.3",
     "y-websocket": "^1.5.0"
   },

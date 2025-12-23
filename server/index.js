@@ -9,7 +9,8 @@ const mongoose = require('mongoose');
 const Room = require('./models/Room');
 const dotenv = require('dotenv');
 const { WebSocketServer } = require('ws');
-const { setupWSConnection } = require('y-websocket');
+const { setupWSConnection } = require('y-websocket/bin/utils.js');
+
 
 
 

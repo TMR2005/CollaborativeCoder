@@ -45,55 +45,125 @@ graph TD
     Worker[Worker Service] --> Queue
     Worker --> Redis
 ```
-### 1. Synchronization Strategy: Why no CRDTs?
-**Decision:** We chose **WebSocket Broadcasts with "Last-Write-Wins" (LWW)** over Operational Transformation (OT) or Conflict-Free Replicated Data Types (CRDTs).
+1. Synchronization Strategy: CRDTs with Yjs
 
-**The Trade-off:**
-* **Complexity vs. Utility:** CRDTs (like Yjs) are excellent for preventing character-level merge conflicts (e.g., two users typing the same word simultaneously). However, in a **pair programming context**, users rarely edit the exact same line at the exact same millisecond. They typically talk and take turns or work on different functions.
-* **Overhead:** CRDTs require maintaining a complex history of operations or vector clocks. For a code interview app, the "Authoritative String" is more important than the edit history.
-* **Compilation:** To run code, the server needs a valid snapshot of the file. LWW allows us to store the raw string in Redis, making the "Run Code" pipeline significantly faster and simpler than reconstructing a file from a CRDT tree.
+Decision: We use Conflict-Free Replicated Data Types (CRDTs) via Yjs for real-time editor synchronization.
 
-### 2. State Management: The "Hot Cache" Pattern
-**Decision:** We use **Redis** as the primary store for active sessions and **MongoDB** for long-term persistence.
+Why CRDTs?
 
-* **The Problem:** Saving to MongoDB on every keystroke (`keyup` event) would crush the database database with write operations.
-* **The Solution:**
-    1.  **Real-time:** Keystrokes are debounced and updated in **Redis** (in-memory). This allows O(1) read/write access for instant syncing.
-    2.  **Hydration:** When a user joins or reconnects, they fetch the state from Redis, not MongoDB. This solves the "Stale Data" issue on browser refresh.
-    3.  **Persistence:** Data is flushed to MongoDB only on explicit "Save" actions or session closure.
+In collaborative editing, users may edit the same document concurrently, even at the same position.
 
-### 3. Remote Code Execution (RCE)
-**Decision:** Asynchronous Job Queue.
-* The server does not run code in the main thread (which would block the event loop).
-* Instead, execution requests are pushed to a **Redis Queue**. A separate Worker process picks up the job, executes it in an isolated environment, and pushes the result back via Pub/Sub to the WebSocket server.
+CRDTs guarantee eventual consistency without requiring a central authority or locks.
 
----
+Offline edits merge deterministically once the client reconnects.
 
-## 🛠️ Tech Stack
+Why Yjs?
 
-### Frontend
-* **React + TypeScript:** Type-safe UI components.
-* **Monaco Editor:** The same code editor engine used in VS Code.
-* **Socket.io-client:** For bidirectional communication.
-* **Tailwind CSS:** For rapid, responsive styling.
+Proven, production-grade CRDT implementation
 
-### Backend
-* **Node.js & Express:** REST API and WebSocket server.
-* **Socket.io:** Manages rooms, broadcasting, and fallbacks.
-* **Redis:** Pub/Sub for execution results and ephemeral state storage (caching code/cursors).
-* **MongoDB:** Persistent storage for user history and chat logs.
+Efficient binary update protocol
 
----
+Strong ecosystem support (Monaco bindings, awareness, persistence)
 
-## ✨ Key Features
+Deterministic merges with low overhead
 
-1.  **Multiplayer Editing:** See changes character-by-character in real-time.
-2.  **Remote Cursors:** Colored vertical bars and highlighted selections show peer activity.
-3.  **Live User List:** Auto-updating sidebar showing who is currently online.
-4.  **Group Chat:** Built-in messaging to discuss logic without leaving the tab.
-5.  **Multi-Language Support:** Run Python, C++, Java, and JavaScript code.
-6.  **Disconnection Recovery:** Auto-rejoins and hydrates state if WiFi drops.
+Design Choice:
 
+Editor text is fully managed by Yjs
+
+A dedicated y-websocket-server handles CRDT synchronization
+
+The main backend does not participate in text merging, keeping concerns isolated and scalable
+
+2. State Management: The “Hot Cache” Pattern
+
+Decision: Use Redis for ephemeral, latency-sensitive state and MongoDB for durable persistence.
+
+The Problem:
+Persisting every keystroke to MongoDB would overwhelm the database with high-frequency writes.
+
+The Solution:
+
+Real-time (Hot Path):
+
+Execution jobs, Pub/Sub events, and transient state are handled in Redis
+
+Enables O(1) access and low-latency operations
+
+Hydration:
+
+On reconnect, clients restore state via Yjs sync and cached metadata
+
+Prevents stale data after refresh or network drops
+
+Persistence (Cold Path):
+
+Explicit save actions flush snapshots to MongoDB
+
+User history and room metadata are stored durably
+
+This separation keeps the system fast while remaining reliable.
+
+3. Remote Code Execution (RCE)
+
+Decision: Asynchronous execution via a Redis-backed job queue.
+
+Execution Flow:
+
+The API server never executes code directly (avoids blocking the event loop)
+
+Code execution requests are pushed to a Redis Queue
+
+A separate Worker process:
+
+Pulls jobs
+
+Executes code in an isolated environment
+
+Publishes results via Redis Pub/Sub
+
+Results are broadcast back to clients in the room
+
+This design ensures scalability, isolation, and responsiveness.
+
+🛠️ Tech Stack
+Frontend
+
+React + TypeScript — Type-safe UI components
+
+Monaco Editor — VS Code–grade editing experience
+
+Yjs + y-websocket — CRDT-based collaboration and awareness
+
+Socket.io-client — Chat and execution events
+
+Tailwind CSS — Responsive UI styling
+
+Backend
+
+Node.js & Express — REST API
+
+Socket.io — Chat, presence, execution status
+
+Redis — Queues, Pub/Sub, ephemeral state
+
+MongoDB — Persistent storage
+
+Worker Service — Isolated code execution
+
+✨ Key Features
+
+CRDT-Based Multiplayer Editing — Conflict-free, real-time collaboration
+
+Live Cursors & Selections — User awareness powered by Yjs
+
+Live User List — Real-time presence updates
+
+Integrated Group Chat — Discuss logic inline
+
+Multi-Language Execution — Python, C++, Java, JavaScript
+
+Automatic Recovery — Safe reconnection after network drops
 ---
 
 ## 🚀 Getting Started

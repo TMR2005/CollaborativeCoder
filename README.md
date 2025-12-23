@@ -189,7 +189,7 @@ This design ensures scalability, isolation, and responsiveness.
 
 1.  **Clone the repo**
     ```bash
-    git clone [https://github.com/yourusername/collaborative-editor.git](https://github.com/yourusername/collaborative-editor.git)
+    git clone [https://github.com/TMR2005/CollaboraticveCoder.git](https://github.com/TMR2005/CollaborativeCoder.git)
     cd collaborative-editor
     ```
 

@@ -1,1 +1,11 @@
+{
+  "name": "yjs-server",
+  "private": true,
+  "dependencies": {
+    "y-websocket": "^1.5.0"
+  },
+  "engines": {
+    "node": "18.x"
+  }
+}
 

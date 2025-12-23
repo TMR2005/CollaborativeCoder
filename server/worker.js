@@ -3,37 +3,71 @@ const axios = require('axios');
 const dotenv = require('dotenv');
 dotenv.config();
 
-// OLD: const redis = new Redis();
-// NEW:
 const REDIS_URL = process.env.REDIS_URL;
-// Connect to Redis
-// (Later we will use process.env.REDIS_URL for production)
+
+if (!REDIS_URL) {
+  console.error('❌ REDIS_URL environment variable is not set');
+  process.exit(1);
+}
+
 const redis = new Redis(REDIS_URL);
 
+redis.on('error', (err) => {
+  console.error('❌ Worker Redis connection error:', err);
+});
+
 async function processSubmission(submission) {
-    const { jobId, sourceCode, language, roomId, input } = JSON.parse(submission);
-
-    console.log(`Processing Job: ${jobId}`);
-
-    let output;
+    let jobId, roomId;
     
     try {
-        output = await runCodeWithPiston(sourceCode, language, input);
+        const parsed = JSON.parse(submission);
+        jobId = parsed.jobId;
+        roomId = parsed.roomId;
+        const { sourceCode, language, input } = parsed;
+
+        console.log(`Processing Job: ${jobId}`);
+
+        if (!sourceCode || !language || !roomId) {
+            throw new Error('Missing required fields in submission');
+        }
+
+        let output;
+        
+        try {
+            output = await runCodeWithPiston(sourceCode, language, input);
+        } catch (error) {
+            console.error("Execution Error:", error);
+            output = "Error executing code: " + (error.message || "Unknown error");
+        }
+
+        // Publish Result
+        const result = JSON.stringify({
+            jobId,
+            roomId,
+            output,
+            status: "success"
+        });
+
+        await redis.publish('job_results', result);
+        console.log(`Finished Job: ${jobId}`);
     } catch (error) {
-        console.error("Execution Error:", error);
-        output = "Error executing code.";
+        console.error("Error processing submission:", error);
+        
+        // Try to publish error result if we have roomId
+        if (roomId) {
+            try {
+                const errorResult = JSON.stringify({
+                    jobId: jobId || 'unknown',
+                    roomId,
+                    output: "Error: Failed to process submission",
+                    status: "error"
+                });
+                await redis.publish('job_results', errorResult);
+            } catch (pubError) {
+                console.error("Failed to publish error result:", pubError);
+            }
+        }
     }
-
-    // Publish Result
-    const result = JSON.stringify({
-        jobId,
-        roomId,
-        output,
-        status: "success"
-    });
-
-    await redis.publish('job_results', result);
-    console.log(`Finished Job: ${jobId}`);
 }
 
 async function runCodeWithPiston(sourceCode, language, input) {
@@ -101,6 +135,8 @@ async function startWorker() {
             }
         } catch (error) {
             console.error("Worker Error:", error);
+            // Wait a bit before retrying to avoid tight error loop
+            await new Promise(resolve => setTimeout(resolve, 1000));
         }
     }
 }

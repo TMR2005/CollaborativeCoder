@@ -45,125 +45,136 @@ graph TD
     Worker[Worker Service] --> Queue
     Worker --> Redis
 ```
-1. Synchronization Strategy: CRDTs with Yjs
+### 1\. Synchronization Strategy: **CRDTs with Yjs**
 
-Decision: We use Conflict-Free Replicated Data Types (CRDTs) via Yjs for real-time editor synchronization.
+**Decision:** We use **Conflict-Free Replicated Data Types (CRDTs)** via **Yjs** for real-time editor synchronization.
 
-Why CRDTs?
+**Why CRDTs?**
 
-In collaborative editing, users may edit the same document concurrently, even at the same position.
+-   In collaborative editing, users may **edit the same document concurrently**, even at the same position.
 
-CRDTs guarantee eventual consistency without requiring a central authority or locks.
+-   CRDTs guarantee **eventual consistency** without requiring a central authority or locks.
 
-Offline edits merge deterministically once the client reconnects.
+-   Offline edits merge deterministically once the client reconnects.
 
-Why Yjs?
+**Why Yjs?**
 
-Proven, production-grade CRDT implementation
+-   Proven, production-grade CRDT implementation
 
-Efficient binary update protocol
+-   Efficient binary update protocol
 
-Strong ecosystem support (Monaco bindings, awareness, persistence)
+-   Strong ecosystem support (Monaco bindings, awareness, persistence)
 
-Deterministic merges with low overhead
+-   Deterministic merges with low overhead
 
-Design Choice:
+**Design Choice:**
 
-Editor text is fully managed by Yjs
+-   Editor text is fully managed by **Yjs**
 
-A dedicated y-websocket-server handles CRDT synchronization
+-   A dedicated **`y-websocket-server`** handles CRDT synchronization
 
-The main backend does not participate in text merging, keeping concerns isolated and scalable
+-   The main backend does **not** participate in text merging, keeping concerns isolated and scalable
 
-2. State Management: The “Hot Cache” Pattern
+* * * * *
 
-Decision: Use Redis for ephemeral, latency-sensitive state and MongoDB for durable persistence.
+### 2\. State Management: The "Hot Cache" Pattern
 
-The Problem:
+**Decision:** Use **Redis** for ephemeral, latency-sensitive state and **MongoDB** for durable persistence.
+
+**The Problem:**\
 Persisting every keystroke to MongoDB would overwhelm the database with high-frequency writes.
 
-The Solution:
+**The Solution:**
 
-Real-time (Hot Path):
+1.  **Real-time (Hot Path):**
 
-Execution jobs, Pub/Sub events, and transient state are handled in Redis
+    -   Execution jobs, Pub/Sub events, and transient state are handled in **Redis**
 
-Enables O(1) access and low-latency operations
+    -   Enables O(1) access and low-latency operations
 
-Hydration:
+2.  **Hydration:**
 
-On reconnect, clients restore state via Yjs sync and cached metadata
+    -   On reconnect, clients restore state via Yjs sync and cached metadata
 
-Prevents stale data after refresh or network drops
+    -   Prevents stale data after refresh or network drops
 
-Persistence (Cold Path):
+3.  **Persistence (Cold Path):**
 
-Explicit save actions flush snapshots to MongoDB
+    -   Explicit save actions flush snapshots to **MongoDB**
 
-User history and room metadata are stored durably
+    -   User history and room metadata are stored durably
 
 This separation keeps the system fast while remaining reliable.
 
-3. Remote Code Execution (RCE)
+* * * * *
 
-Decision: Asynchronous execution via a Redis-backed job queue.
+### 3\. Remote Code Execution (RCE)
 
-Execution Flow:
+**Decision:** Asynchronous execution via a **Redis-backed job queue**.
 
-The API server never executes code directly (avoids blocking the event loop)
+**Execution Flow:**
 
-Code execution requests are pushed to a Redis Queue
+-   The API server never executes code directly (avoids blocking the event loop)
 
-A separate Worker process:
+-   Code execution requests are pushed to a **Redis Queue**
 
-Pulls jobs
+-   A separate **Worker process**:
 
-Executes code in an isolated environment
+    -   Pulls jobs
 
-Publishes results via Redis Pub/Sub
+    -   Executes code in an isolated environment
 
-Results are broadcast back to clients in the room
+    -   Publishes results via Redis Pub/Sub
+
+-   Results are broadcast back to clients in the room
 
 This design ensures scalability, isolation, and responsiveness.
 
+* * * * *
+
 🛠️ Tech Stack
-Frontend
+--------------
 
-React + TypeScript — Type-safe UI components
+### Frontend
 
-Monaco Editor — VS Code–grade editing experience
+-   **React + TypeScript** --- Type-safe UI components
 
-Yjs + y-websocket — CRDT-based collaboration and awareness
+-   **Monaco Editor** --- VS Code--grade editing experience
 
-Socket.io-client — Chat and execution events
+-   **Yjs + y-websocket** --- CRDT-based collaboration and awareness
 
-Tailwind CSS — Responsive UI styling
+-   **Socket.io-client** --- Chat and execution events
 
-Backend
+-   **Tailwind CSS** --- Responsive UI styling
 
-Node.js & Express — REST API
+### Backend
 
-Socket.io — Chat, presence, execution status
+-   **Node.js & Express** --- REST API
 
-Redis — Queues, Pub/Sub, ephemeral state
+-   **Socket.io** --- Chat, presence, execution status
 
-MongoDB — Persistent storage
+-   **Redis** --- Queues, Pub/Sub, ephemeral state
 
-Worker Service — Isolated code execution
+-   **MongoDB** --- Persistent storage
+
+-   **Worker Service** --- Isolated code execution
+
+* * * * *
 
 ✨ Key Features
+--------------
 
-CRDT-Based Multiplayer Editing — Conflict-free, real-time collaboration
+1.  **CRDT-Based Multiplayer Editing** --- Conflict-free, real-time collaboration
 
-Live Cursors & Selections — User awareness powered by Yjs
+2.  **Live Cursors & Selections** --- User awareness powered by Yjs
 
-Live User List — Real-time presence updates
+3.  **Live User List** --- Real-time presence updates
 
-Integrated Group Chat — Discuss logic inline
+4.  **Integrated Group Chat** --- Discuss logic inline
 
-Multi-Language Execution — Python, C++, Java, JavaScript
+5.  **Multi-Language Execution** --- Python, C++, Java, JavaScript
 
-Automatic Recovery — Safe reconnection after network drops
+6.  **Automatic Recovery** --- Safe reconnection after network drops
 ---
 
 ## 🚀 Getting Started

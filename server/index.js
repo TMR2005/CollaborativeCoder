@@ -1,6 +1,3 @@
-
-require('./worker');
-
 const express = require('express');
 const cors = require('cors');
 const Redis = require('ioredis');
@@ -17,40 +14,34 @@ const authRoutes = require('./auth');
 dotenv.config();
 
 const app = express();
+
 app.use(cors());
 app.use(express.json());
 
 /* ============================
-   Redis Setup
+   Redis
 ============================ */
 
-const REDIS_URL = process.env.REDIS_URL;
-if (!REDIS_URL) {
-  console.error('❌ REDIS_URL not set');
-  process.exit(1);
-}
+const redis = new Redis(process.env.REDIS_URL);
+const sub = new Redis(process.env.REDIS_URL);
 
-const redis = new Redis(REDIS_URL);
-const sub = new Redis(REDIS_URL);
+redis.on('error', err => {
+  console.error('❌ Redis Error:', err);
+});
 
-redis.on('error', err => console.error('❌ Redis error:', err));
-sub.on('error', err => console.error('❌ Redis sub error:', err));
+sub.on('error', err => {
+  console.error('❌ Redis Sub Error:', err);
+});
 
 /* ============================
-   MongoDB Setup
+   MongoDB
 ============================ */
 
-const MONGO_URL = process.env.MONGO_URL;
-if (!MONGO_URL) {
-  console.error('❌ MONGO_URL not set');
-  process.exit(1);
-}
-
 mongoose
-  .connect(MONGO_URL)
+  .connect(process.env.MONGO_URL)
   .then(() => console.log('🍃 MongoDB Connected'))
   .catch(err => {
-    console.error('❌ MongoDB error:', err);
+    console.error('❌ MongoDB Error:', err);
     process.exit(1);
   });
 
@@ -68,7 +59,7 @@ const io = new Server(server, {
 });
 
 /* ============================
-   Socket.io State
+   Socket State
 ============================ */
 
 const userSocketMap = {};
@@ -87,13 +78,16 @@ function getAllConnectedClients(roomId) {
 ============================ */
 
 io.on('connection', socket => {
-  console.log(`🟢 Socket connected: ${socket.id}`);
+  console.log(`🟢 Socket Connected: ${socket.id}`);
 
   socket.on('join_room', ({ roomId, username }) => {
     if (!roomId || !username) return;
 
     userSocketMap[socket.id] = username;
+
     socket.join(roomId);
+
+    console.log(`✅ ${username} joined ${roomId}`);
 
     io.to(roomId).emit('joined', {
       clients: getAllConnectedClients(roomId),
@@ -102,8 +96,21 @@ io.on('connection', socket => {
     });
   });
 
+  /* ============================
+     Realtime Code Sync
+  ============================ */
+
+  socket.on('code_change', ({ roomId, code }) => {
+    socket.to(roomId).emit('code_update', code);
+  });
+
+  /* ============================
+     Chat
+  ============================ */
+
   socket.on('send_message', ({ roomId, message, username, time }) => {
     if (!roomId || !message || !username) return;
+
     if (!message.trim()) return;
 
     io.to(roomId).emit('receive_message', {
@@ -113,6 +120,10 @@ io.on('connection', socket => {
     });
   });
 
+  /* ============================
+     Disconnect
+  ============================ */
+
   socket.on('disconnecting', () => {
     for (const roomId of socket.rooms) {
       socket.in(roomId).emit('disconnected', {
@@ -120,6 +131,7 @@ io.on('connection', socket => {
         username: userSocketMap[socket.id]
       });
     }
+
     delete userSocketMap[socket.id];
   });
 });
@@ -132,29 +144,49 @@ sub.subscribe('job_results');
 
 sub.on('message', (_, message) => {
   try {
-    const { roomId, output, status } = JSON.parse(message);
-    if (roomId) {
-      io.to(roomId).emit('code_result', { output, status });
-    }
-  } catch (e) {
-    console.error('❌ Job result parse error:', e);
+    console.log('📥 Worker Result:', message);
+
+    const parsed = JSON.parse(message);
+
+    const { roomId, output, status } = parsed;
+
+    io.to(roomId).emit('code_result', {
+      output,
+      status
+    });
+
+    console.log(`📤 Sent result to room ${roomId}`);
+
+  } catch (err) {
+    console.error('❌ Result Parse Error:', err);
   }
 });
 
 /* ============================
-   REST API
+   Health
 ============================ */
 
 app.get('/health', (_, res) => {
-  res.send('CollaborativeCoder API running');
+  res.send('CollaborativeCoder API Running');
 });
+
+/* ============================
+   Submit Code
+============================ */
 
 app.post('/submit', async (req, res) => {
   try {
-    const { sourceCode, language, input, roomId } = req.body;
+    const {
+      sourceCode,
+      language,
+      input,
+      roomId
+    } = req.body;
 
     if (!sourceCode || !language || !roomId) {
-      return res.status(400).json({ error: 'Missing fields' });
+      return res.status(400).json({
+        error: 'Missing fields'
+      });
     }
 
     const job = {
@@ -165,60 +197,144 @@ app.post('/submit', async (req, res) => {
       roomId
     };
 
-    await redis.rpush('submission_queue', JSON.stringify(job));
-    res.status(202).json({ jobId: job.jobId });
+    await redis.rpush(
+      'submission_queue',
+      JSON.stringify(job)
+    );
+
+    console.log(`📦 Queued Job ${job.jobId}`);
+
+    res.status(202).json({
+      success: true,
+      jobId: job.jobId
+    });
+
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Submit failed' });
+
+    res.status(500).json({
+      error: 'Submit failed'
+    });
   }
 });
+
+/* ============================
+   Room Fetch
+============================ */
 
 app.get('/room/:roomId', async (req, res) => {
   try {
     const { roomId } = req.params;
 
     let room = await Room.findOne({ roomId });
+
     if (!room) {
-      room = await Room.create({ roomId, code: '', language: 'python' });
+      room = await Room.create({
+        roomId,
+        code: '',
+        language: 'python'
+      });
     }
 
     res.json(room);
+
   } catch (err) {
-    res.status(500).json({ error: 'Room fetch failed' });
+    console.error(err);
+
+    res.status(500).json({
+      error: 'Room fetch failed'
+    });
   }
 });
+
+/* ============================
+   Save Code
+============================ */
 
 app.post('/save', async (req, res) => {
   try {
-    const { roomId, code, language } = req.body;
+    const {
+      roomId,
+      code,
+      language
+    } = req.body;
 
     await Room.findOneAndUpdate(
       { roomId },
-      { code: code || '', language: language || 'python' },
+      {
+        code: code || '',
+        language: language || 'python'
+      },
       { upsert: true }
     );
 
-    res.json({ message: 'Saved' });
-  } catch {
-    res.status(500).json({ error: 'Save failed' });
+    res.json({
+      success: true
+    });
+
+  } catch (err) {
+    console.error(err);
+
+    res.status(500).json({
+      error: 'Save failed'
+    });
   }
 });
+
+/* ============================
+   Auth
+============================ */
 
 app.use('/auth', authRoutes);
 
+/* ============================
+   Verify Room
+============================ */
+
 app.post('/verify-room', async (req, res) => {
-  const { roomId, userId } = req.body;
-  if (userId) {
-    await User.findByIdAndUpdate(userId, {
-      $addToSet: { visitedRooms: roomId }
+  try {
+    const { roomId, userId } = req.body;
+
+    if (userId) {
+      await User.findByIdAndUpdate(userId, {
+        $addToSet: {
+          visitedRooms: roomId
+        }
+      });
+    }
+
+    res.json({
+      success: true
+    });
+
+  } catch (err) {
+    console.error(err);
+
+    res.status(500).json({
+      error: 'Verification failed'
     });
   }
-  res.json({ success: true });
 });
 
+/* ============================
+   User Rooms
+============================ */
+
 app.get('/user-rooms/:userId', async (req, res) => {
-  const user = await User.findById(req.params.userId);
-  res.json({ rooms: user?.visitedRooms || [] });
+  try {
+    const user = await User.findById(req.params.userId);
+
+    res.json({
+      rooms: user?.visitedRooms || []
+    });
+
+  } catch (err) {
+    console.error(err);
+
+    res.status(500).json({
+      error: 'Fetch failed'
+    });
+  }
 });
 
 /* ============================
@@ -226,6 +342,7 @@ app.get('/user-rooms/:userId', async (req, res) => {
 ============================ */
 
 const PORT = process.env.PORT || 5000;
+
 server.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🚀 Server running on ${PORT}`);
 });

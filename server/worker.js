@@ -1,142 +1,289 @@
 const Redis = require('ioredis');
-const axios = require('axios');
 const dotenv = require('dotenv');
+const fs = require('fs/promises');
+const path = require('path');
+const os = require('os');
+const { spawn } = require('child_process');
+const crypto = require('crypto');
+
 dotenv.config();
 
 const REDIS_URL = process.env.REDIS_URL;
 
 if (!REDIS_URL) {
-  console.error('❌ REDIS_URL environment variable is not set');
-  process.exit(1);
+    console.error('❌ REDIS_URL not set');
+    process.exit(1);
 }
 
 const redis = new Redis(REDIS_URL);
 
 redis.on('error', (err) => {
-  console.error('❌ Worker Redis connection error:', err);
+    console.error('❌ Redis Error:', err);
 });
 
-async function processSubmission(submission) {
-    let jobId, roomId;
-    
-    try {
-        const parsed = JSON.parse(submission);
-        jobId = parsed.jobId;
-        roomId = parsed.roomId;
-        const { sourceCode, language, input } = parsed;
+const LANGUAGE_CONFIG = {
+    python: {
+        extension: 'py',
+        run: (filepath) => ({
+            command: 'python3',
+            args: [filepath]
+        })
+    },
 
-        console.log(`Processing Job: ${jobId}`);
+    javascript: {
+        extension: 'js',
+        run: (filepath) => ({
+            command: 'node',
+            args: [filepath]
+        })
+    },
 
-        if (!sourceCode || !language || !roomId) {
-            throw new Error('Missing required fields in submission');
-        }
+    cpp: {
+        extension: 'cpp',
 
-        let output;
-        
-        try {
-            output = await runCodeWithPiston(sourceCode, language, input);
-        } catch (error) {
-            console.error("Execution Error:", error);
-            output = "Error executing code: " + (error.message || "Unknown error");
-        }
+        compile: (filepath, dir) => ({
+            command: 'g++',
+            args: [
+                filepath,
+                '-O2',
+                '-std=c++17',
+                '-o',
+                path.join(dir, 'main')
+            ]
+        }),
 
-        // Publish Result
-        const result = JSON.stringify({
-            jobId,
-            roomId,
-            output,
-            status: "success"
+        run: (_, dir) => ({
+            command: path.join(dir, 'main'),
+            args: []
+        })
+    }
+};
+
+const MAX_OUTPUT = 50000;
+const EXECUTION_TIMEOUT = 5000;
+
+function truncateOutput(output = '') {
+    if (output.length > MAX_OUTPUT) {
+        return output.slice(0, MAX_OUTPUT) + '\n...output truncated';
+    }
+    return output;
+}
+
+function execute(command, args, input, timeout, cwd) {
+    return new Promise((resolve) => {
+        const proc = spawn(command, args, {
+            cwd,
+            detached: false
         });
 
-        await redis.publish('job_results', result);
-        console.log(`Finished Job: ${jobId}`);
-    } catch (error) {
-        console.error("Error processing submission:", error);
-        
-        // Try to publish error result if we have roomId
-        if (roomId) {
-            try {
-                const errorResult = JSON.stringify({
-                    jobId: jobId || 'unknown',
-                    roomId,
-                    output: "Error: Failed to process submission",
-                    status: "error"
+        let stdout = '';
+        let stderr = '';
+        let killed = false;
+
+        const timer = setTimeout(() => {
+            killed = true;
+            proc.kill('SIGKILL');
+        }, timeout);
+
+        proc.stdout.on('data', (data) => {
+            stdout += data.toString();
+        });
+
+        proc.stderr.on('data', (data) => {
+            stderr += data.toString();
+        });
+
+        proc.on('close', (code) => {
+            clearTimeout(timer);
+
+            if (killed) {
+                return resolve({
+                    success: false,
+                    error: 'Time Limit Exceeded'
                 });
-                await redis.publish('job_results', errorResult);
-            } catch (pubError) {
-                console.error("Failed to publish error result:", pubError);
             }
+
+            resolve({
+                success: code === 0,
+                stdout: truncateOutput(stdout),
+                stderr: truncateOutput(stderr),
+                code
+            });
+        });
+
+        if (input) {
+            proc.stdin.write(input);
+        }
+
+        proc.stdin.end();
+    });
+}
+
+async function runCode(sourceCode, language, input = '') {
+    const config = LANGUAGE_CONFIG[language];
+
+    if (!config) {
+        return {
+            type: 'error',
+            output: 'Unsupported language'
+        };
+    }
+
+    const jobId = crypto.randomUUID();
+
+    const tempDir = path.join(os.tmpdir(), `exec-${jobId}`);
+
+    await fs.mkdir(tempDir, { recursive: true });
+
+    try {
+        const filename = `main.${config.extension}`;
+        const filepath = path.join(tempDir, filename);
+
+        await fs.writeFile(filepath, sourceCode);
+
+        // Compile Step (for C++)
+        if (config.compile) {
+            const compileCmd = config.compile(filepath, tempDir);
+
+            const compileResult = await execute(
+                compileCmd.command,
+                compileCmd.args,
+                '',
+                10000,
+                tempDir
+            );
+
+            if (!compileResult.success) {
+                return {
+                    type: 'compile_error',
+                    output: compileResult.stderr || 'Compilation failed'
+                };
+            }
+        }
+
+        // Run Step
+        const runCmd = config.run(filepath, tempDir);
+
+        const runResult = await execute(
+            runCmd.command,
+            runCmd.args,
+            input,
+            EXECUTION_TIMEOUT,
+            tempDir
+        );
+
+        if (!runResult.success) {
+            return {
+                type: 'runtime_error',
+                output: runResult.stderr || 'Runtime Error'
+            };
+        }
+
+        return {
+            type: 'success',
+            output: runResult.stdout || ''
+        };
+
+    } catch (err) {
+        console.error(err);
+
+        return {
+            type: 'internal_error',
+            output: err.message
+        };
+
+    } finally {
+        try {
+            await fs.rm(tempDir, {
+                recursive: true,
+                force: true
+            });
+        } catch (cleanupErr) {
+            console.error('Cleanup Error:', cleanupErr);
         }
     }
 }
 
-async function runCodeWithPiston(sourceCode, language, input) {
-    // 1. Map our simple language names to Piston's specific versions
-    // You can check supported versions here: https://emkc.org/api/v2/piston/runtimes
-    const languageMap = {
-        'python': { language: 'python', version: '3.10.0' },
-        'cpp': { language: 'c++', version: '10.2.0' },
-        'javascript': { language: 'javascript', version: '18.15.0' } // Bonus: JS Support
-    };
+async function processSubmission(submission) {
+    let parsed;
 
-    const target = languageMap[language];
-    
-    if (!target) {
-        return "Error: Unsupported Language";
-    }
-
-    // 2. Call the API
     try {
-        const response = await axios.post('https://emkc.org/api/v2/piston/execute', {
-            language: target.language,
-            version: target.version,
-            files: [
-                {
-                    content: sourceCode
-                }
-            ],
-            stdin: input || "", // Pass the user input here
-            args: [],
-            compile_timeout: 10000,
-            run_timeout: 3000,
-            memory_limit: 128 * 1024 * 1024, // 128MB
-        });
+        parsed = JSON.parse(submission);
 
-        const { run, compile } = response.data;
+        const {
+            jobId,
+            roomId,
+            sourceCode,
+            language,
+            input
+        } = parsed;
 
-        // 3. Handle Compilation Errors (mostly for C++)
-        if (compile && compile.stderr) {
-            return `Compilation Error:\n${compile.stderr}`;
+        console.log(`⚡ Processing Job ${jobId}`);
+
+        if (!jobId || !roomId || !sourceCode || !language) {
+            throw new Error('Missing required fields');
         }
 
-        // 4. Handle Runtime Output/Errors
-        // Piston separates stdout (success) and stderr (errors)
-        if (run.stderr) {
-            return run.stderr;
+        if (sourceCode.length > 50000) {
+            throw new Error('Code too large');
         }
-        
-        return run.stdout;
 
-    } catch (error) {
-        console.error("Piston API Error:", error.message);
-        return "Error: Failed to connect to execution engine.";
+        const result = await runCode(
+            sourceCode,
+            language,
+            input
+        );
+
+        await redis.publish(
+            'job_results',
+            JSON.stringify({
+                jobId,
+                roomId,
+                status: result.type,
+                output: result.output
+            })
+        );
+
+        console.log(`✅ Finished Job ${jobId}`);
+
+    } catch (err) {
+        console.error('Processing Error:', err);
+
+        if (parsed?.roomId) {
+            await redis.publish(
+                'job_results',
+                JSON.stringify({
+                    jobId: parsed.jobId,
+                    roomId: parsed.roomId,
+                    status: 'error',
+                    output: err.message
+                })
+            );
+        }
     }
 }
 
 async function startWorker() {
-    console.log("Worker started. Listening for jobs...");
+    console.log('🚀 Worker started');
 
     while (true) {
         try {
-            const response = await redis.blpop('submission_queue', 0);
+            const response = await redis.blpop(
+                'submission_queue',
+                0
+            );
+
             if (response) {
                 const submission = response[1];
                 await processSubmission(submission);
             }
-        } catch (error) {
-            console.error("Worker Error:", error);
-            // Wait a bit before retrying to avoid tight error loop
-            await new Promise(resolve => setTimeout(resolve, 1000));
+
+        } catch (err) {
+            console.error('Worker Loop Error:', err);
+
+            await new Promise((r) =>
+                setTimeout(r, 1000)
+            );
         }
     }
 }

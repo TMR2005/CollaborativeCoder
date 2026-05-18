@@ -54,7 +54,12 @@ function Editor() {
     };
 
     fetchRoomData();
-    socket.emit('join_room', roomId);
+    socket.emit('join_room', {
+      roomId,
+      username:
+        localStorage.getItem('username')
+        || 'Anonymous'
+    });
 
     socket.on('code_update', (newCode: string) => {
       setCode(newCode);

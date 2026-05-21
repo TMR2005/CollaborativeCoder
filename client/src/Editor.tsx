@@ -1,444 +1,224 @@
-import { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import io, { Socket } from 'socket.io-client';
-import MonacoEditor from '@monaco-editor/react';
+import { useEffect, useRef, useState } from 'react';
+import io from 'socket.io-client';
 import axios from 'axios';
+import MonacoEditor from '@monaco-editor/react';
+import { useParams } from 'react-router-dom';
+
+const API =
+'https://collaborativecoderapi.onrender.com';
+
+function Editor(){
 
-import {
-  Code2,
-  Play,
-  Home,
-  Copy,
-  Check,
-  Terminal,
-  FileInput,
-  Settings,
-  Loader2,
-  Users,
-  Save
-} from 'lucide-react';
-
-import type { RoomData } from './types';
-
-function Editor() {
-  const socketRef = useRef<Socket | null>(null);
-
-  const [userInput, setUserInput] = useState('');
-  const [code, setCode] = useState(
-    "# Write your Python code here\nprint('Hello World')"
-  );
-  const [output, setOutput] = useState('');
-  const [status, setStatus] = useState('');
-  const [language, setLanguage] = useState('python');
-  const [copied, setCopied] = useState(false);
-  const [saving, setSaving] = useState(false);
-
-  const { roomId } = useParams<{ roomId: string }>();
-  const navigate = useNavigate();
-
-  const API_URL =
-    'https://collaborativecoderapi.onrender.com';
-
-  useEffect(() => {
-    if (!roomId) return;
-
-    const socket = io(API_URL, {
-      transports: ['websocket'],
-      reconnection: true,
-      reconnectionAttempts: 5
-    });
-
-    socketRef.current = socket;
-
-    /* ============================
-       Verify User
-    ============================ */
-
-    const userId = localStorage.getItem('userId');
-
-    if (userId) {
-      axios
-        .post(`${API_URL}/verify-room`, {
-          roomId,
-          userId
-        })
-        .catch(err => {
-          console.error(
-            'Verification failed:',
-            err
-          );
-        });
-    }
-
-    /* ============================
-       Load Room
-    ============================ */
-
-    const fetchRoomData = async () => {
-      try {
-        const response =
-          await axios.get<RoomData>(
-            `${API_URL}/room/${roomId}`
-          );
-
-        if (response.data) {
-          setCode(
-            response.data.code ||
-            "# Write your Python code here\nprint('Hello World')"
-          );
-
-          setLanguage(
-            response.data.language ||
-            'python'
-          );
-        }
-
-      } catch (err) {
-        console.error(
-          'Failed to load room:',
-          err
-        );
-      }
-    };
-
-    fetchRoomData();
-
-    /* ============================
-       Socket Events
-    ============================ */
-
-    socket.on('connect', () => {
-
-      console.log(
-        '🟢 Connected:',
-        socket.id
-      );
-
-      socket.emit(
-        'join_room',
-        {
-          roomId,
-          username:
-            localStorage.getItem(
-              'username'
-            ) || 'Anonymous'
-        }
-      );
-
-      console.log(
-        `Joined room: ${roomId}`
-      );
-    });
-
-    socket.on(
-      'joined',
-      data => {
-        console.log(
-          'Users in room:',
-          data
-        );
-      }
-    );
-
-    socket.on(
-      'code_update',
-      (newCode: string) => {
-
-        console.log(
-          'Code Updated'
-        );
-
-        setCode(newCode);
-      }
-    );
-
-    socket.on(
-      'code_result',
-      result => {
-
-        console.log(
-          'Execution Result:',
-          result
-        );
-
-        setOutput(
-          result.output
-        );
-
-        setStatus(
-          result.status === 'success'
-            ? 'Execution Finished'
-            : `Error: ${result.status}`
-        );
-      }
-    );
-
-    socket.on(
-      'disconnect',
-      () => {
-
-        console.log(
-          '🔴 Disconnected'
-        );
-      }
-    );
-
-    return () => {
-
-      socket.off('connect');
-      socket.off('joined');
-      socket.off('code_update');
-      socket.off('code_result');
-      socket.off('disconnect');
-
-      socket.disconnect();
-    };
-
-  }, [roomId]);
-
-  /* ============================
-     Editor Change
-  ============================ */
-
-  const handleEditorChange = (
-    value: string | undefined
-  ) => {
-
-    if (!value) return;
-
-    setCode(value);
+const socketRef=useRef(null);
+
+const {roomId}=useParams();
 
-    socketRef.current?.emit(
-      'code_change',
-      {
-        roomId,
-        code: value
-      }
-    );
-  };
-
-  /* ============================
-     Save
-  ============================ */
+const [code,setCode]=useState(
+`print("Hello World")`
+);
 
-  const saveCode = async () => {
+const [output,setOutput]=
+useState('');
 
-    if (!roomId) return;
+const [status,setStatus]=
+useState('');
 
-    setSaving(true);
+const [language,setLanguage]=
+useState('python');
 
-    try {
+const [userInput,setUserInput]=
+useState('');
 
-      await axios.post(
-        `${API_URL}/save`,
-        {
-          roomId,
-          code,
-          language
-        }
-      );
+useEffect(()=>{
 
-    } catch(err){
+if(!roomId)return;
 
-      console.error(
-        'Save failed:',
-        err
-      );
+const socket=io(
+API,
+{
+transports:['websocket'],
+reconnection:true,
+reconnectionAttempts:Infinity,
+timeout:20000
+}
+);
 
-    } finally {
+socketRef.current=socket;
 
-      setSaving(false);
-    }
-  };
+socket.on(
+'connect',
+()=>{
 
-  /* ============================
-     Run
-  ============================ */
+console.log(
+'Connected:',
+socket.id
+);
 
-  const runCode = async () => {
+socket.emit(
+'join_room',
+{
+roomId,
+username:
+localStorage.getItem(
+'username'
+)
+||
+'Anonymous'
+}
+);
 
-    if (!roomId) return;
+}
+);
 
-    setStatus(
-      'Running...'
-    );
+socket.on(
+'code_update',
+newCode=>{
 
-    setOutput('');
+setCode(
+newCode
+);
 
-    try {
+}
+);
 
-      await saveCode();
+socket.on(
+'code_result',
+result=>{
 
-      await axios.post(
-        `${API_URL}/submit`,
-        {
-          roomId,
-          sourceCode: code,
-          language,
-          input: userInput
-        }
-      );
+console.log(
+'RESULT:',
+result
+);
 
-    } catch(err){
-
-      console.error(err);
+setOutput(
+result.output
+);
 
-      setStatus(
-        'Execution Failed'
-      );
-
-      setOutput(
-        'Could not execute code'
-      );
-    }
-  };
-
-  /* ============================
-     Copy Room
-  ============================ */
+setStatus(
+result.status==='success'
+?
+'Execution Finished'
+:
+result.status
+);
 
-  const copyRoomId = () => {
+}
+);
 
-    if (!roomId) return;
+return ()=>{
 
-    navigator.clipboard.writeText(
-      roomId
-    );
-
-    setCopied(true);
+socket.off(
+'connect'
+);
 
-    setTimeout(
-      ()=>setCopied(false),
-      2000
-    );
-  };
+socket.off(
+'code_update'
+);
 
-  return (
-    <div className="h-screen flex flex-col bg-slate-900">
+socket.off(
+'code_result'
+);
 
-      {/* Navbar */}
-
-      <nav className="bg-slate-800 border-b border-slate-700 px-4 h-14 flex items-center justify-between">
-
-        <div className="flex items-center gap-4">
-
-          <button
-            onClick={()=>navigate('/')}
-          >
-            <Home className="w-5 h-5 text-slate-300"/>
-          </button>
+socket.disconnect();
 
-          <div className="flex items-center gap-2">
-
-            <Code2 className="w-5 h-5 text-blue-400"/>
+};
 
-            <span className="text-white">
-              Room:
-            </span>
+},[roomId]);
 
-            <code className="bg-slate-700 px-2 py-1 rounded">
+const runCode=
+async()=>{
 
-              {roomId?.substring(0,8)}...
+setOutput('');
 
-            </code>
+setStatus(
+'Running...'
+);
 
-            <button
-              onClick={copyRoomId}
-            >
-              {copied
-                ? <Check/>
-                : <Copy/>
-              }
-            </button>
+try{
 
-          </div>
+await axios.post(
+`${API}/submit`,
+{
+roomId,
+sourceCode:
+code,
+language,
+input:
+userInput
+}
+);
 
-        </div>
+}
+catch(err){
 
-        <div className="flex gap-3">
+console.error(err);
 
-          <select
-            value={language}
-            onChange={(e)=>
-              setLanguage(
-                e.target.value
-              )
-            }
-          >
-            <option value="python">
-              Python
-            </option>
+setStatus(
+'Execution Failed'
+);
 
-            <option value="cpp">
-              C++
-            </option>
-          </select>
+}
 
-          <button
-            onClick={saveCode}
-          >
-            {saving
-              ? 'Saving...'
-              : 'Save'}
-          </button>
+};
 
-          <button
-            onClick={runCode}
-          >
-            {status==="Running..."
-              ? 'Running...'
-              : 'Run'}
-          </button>
+return(
 
-        </div>
+<div>
 
-      </nav>
+<MonacoEditor
+height="70vh"
+theme="vs-dark"
+language={language}
+value={code}
+onChange={value=>{
 
-      <div className="flex flex-1">
+setCode(value);
 
-        <div className="flex-1">
+socketRef.current?.
+emit(
+'code_change',
+{
+roomId,
+code:value
+}
+);
 
-          <MonacoEditor
-            height="100%"
-            language={language}
-            theme="vs-dark"
-            value={code}
-            onChange={handleEditorChange}
-          />
+}}
+/>
 
-        </div>
+<textarea
+value={userInput}
+onChange={e=>
+setUserInput(
+e.target.value
+)
+}
+/>
 
-        <div className="w-96 bg-slate-800 flex flex-col">
+<button
+onClick={
+runCode
+}
+>
+Run
+</button>
 
-          <textarea
-            value={userInput}
-            onChange={e=>
-              setUserInput(
-                e.target.value
-              )
-            }
-            placeholder="stdin input..."
-          />
+<div>
 
-          <div className="flex-1 p-4">
+<h3>
+{status}
+</h3>
 
-            <div>
-              {status}
-            </div>
+<pre>
+{output}
+</pre>
 
-            <pre className="text-white whitespace-pre-wrap">
-              {output ||
-                'Waiting for output...'}
-            </pre>
+</div>
 
-          </div>
+</div>
 
-        </div>
+);
 
-      </div>
-
-    </div>
-  );
 }
 
 export default Editor;

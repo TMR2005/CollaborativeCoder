@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import io, { Socket } from 'socket.io-client';
 import MonacoEditor from '@monaco-editor/react';
@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import type { CodeResult, RoomData } from './types';
 
-let socket: Socket;
+const socketRef = useRef<Socket | null>(null);
 
 function Editor() {
   const [userInput, setUserInput] = useState('');
@@ -34,7 +34,7 @@ function Editor() {
   useEffect(() => {
     if (!roomId) return;
 
-    socket = io('https://collaborativecoderapi.onrender.com');
+    socketRef.current = io();
     const userId = localStorage.getItem('userId');
 
     if (userId) {
@@ -54,34 +54,34 @@ function Editor() {
     };
 
     fetchRoomData();
-    socket.emit('join_room', {
+      socketRef.current?.emit('join_room', {
       roomId,
       username:
         localStorage.getItem('username')
         || 'Anonymous'
     });
 
-    socket.on('code_update', (newCode: string) => {
+      socketRef.current?.on('code_update', (newCode: string) => {
       setCode(newCode);
     });
 
-    socket.on('code_result', (result: CodeResult) => {
+      socketRef.current?.on('code_result', (result: any) => {
       setOutput(result.output);
-      setStatus('Execution Finished');
+      setStatus(result.status === 'success' ? 'Execution Finished' : `Error: ${result.status}`);
     });
 
     return () => {
-      socket.off('code_update');
-      socket.off('code_result');
-      socket.disconnect();
+      socketRef.current?.off('code_update');
+      socketRef.current?.off('code_result');
+      socketRef.current?.disconnect();
     };
   }, [roomId]);
 
   const handleEditorChange = (value: string | undefined) => {
     if (value === undefined) return;
     setCode(value);
-    if (socket && roomId) {
-      socket.emit('code_change', { roomId, code: value });
+    if (socketRef.current && roomId) {
+      socketRef.current?.emit('code_change', { roomId, code: value });
     }
   };
 

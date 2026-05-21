@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import io, { Socket } from 'socket.io-client';
 import MonacoEditor from '@monaco-editor/react';
 import axios from 'axios';
+
 import {
   Code2,
   Play,
@@ -16,288 +17,426 @@ import {
   Users,
   Save
 } from 'lucide-react';
+
 import type { RoomData } from './types';
 
 function Editor() {
   const socketRef = useRef<Socket | null>(null);
+
   const [userInput, setUserInput] = useState('');
-  const [code, setCode] = useState("# Write your Python code here\nprint('Hello World')");
+  const [code, setCode] = useState(
+    "# Write your Python code here\nprint('Hello World')"
+  );
   const [output, setOutput] = useState('');
   const [status, setStatus] = useState('');
   const [language, setLanguage] = useState('python');
   const [copied, setCopied] = useState(false);
   const [saving, setSaving] = useState(false);
+
   const { roomId } = useParams<{ roomId: string }>();
   const navigate = useNavigate();
+
+  const API_URL =
+    'https://collaborativecoderapi.onrender.com';
 
   useEffect(() => {
     if (!roomId) return;
 
-    socketRef.current = io('https://collaborativecoderapi.onrender.com');
+    const socket = io(API_URL, {
+      transports: ['websocket'],
+      reconnection: true,
+      reconnectionAttempts: 5
+    });
+
+    socketRef.current = socket;
+
+    /* ============================
+       Verify User
+    ============================ */
+
     const userId = localStorage.getItem('userId');
 
     if (userId) {
-      axios.post('https://collaborativecoderapi.onrender.com/verify-room', { roomId, userId })
-        .catch(err => console.error('Verification failed:', err));
+      axios
+        .post(`${API_URL}/verify-room`, {
+          roomId,
+          userId
+        })
+        .catch(err => {
+          console.error(
+            'Verification failed:',
+            err
+          );
+        });
     }
+
+    /* ============================
+       Load Room
+    ============================ */
 
     const fetchRoomData = async () => {
       try {
-        const response = await axios.get<RoomData>(`https://collaborativecoderapi.onrender.com/room/${roomId}`);
+        const response =
+          await axios.get<RoomData>(
+            `${API_URL}/room/${roomId}`
+          );
+
         if (response.data) {
-          setCode(response.data.code || "# Write your Python code here\nprint('Hello World')");
-          setLanguage(response.data.language || 'python');
+          setCode(
+            response.data.code ||
+            "# Write your Python code here\nprint('Hello World')"
+          );
+
+          setLanguage(
+            response.data.language ||
+            'python'
+          );
         }
+
       } catch (err) {
-        console.error('Failed to load room data:', err);
+        console.error(
+          'Failed to load room:',
+          err
+        );
       }
     };
 
     fetchRoomData();
-    
-    socketRef.current?.emit('join_room', {
-      roomId,
-      username: localStorage.getItem('username') || 'Anonymous'
+
+    /* ============================
+       Socket Events
+    ============================ */
+
+    socket.on('connect', () => {
+
+      console.log(
+        '🟢 Connected:',
+        socket.id
+      );
+
+      socket.emit(
+        'join_room',
+        {
+          roomId,
+          username:
+            localStorage.getItem(
+              'username'
+            ) || 'Anonymous'
+        }
+      );
+
+      console.log(
+        `Joined room: ${roomId}`
+      );
     });
 
-    socketRef.current?.on('code_update', (newCode: string) => {
-      setCode(newCode);
-    });
+    socket.on(
+      'joined',
+      data => {
+        console.log(
+          'Users in room:',
+          data
+        );
+      }
+    );
 
-    socketRef.current?.on('code_result', (result: any) => {
-      setOutput(result.output);
-      setStatus(result.status === 'success' ? 'Execution Finished' : `Error: ${result.status}`);
-    });
+    socket.on(
+      'code_update',
+      (newCode: string) => {
+
+        console.log(
+          'Code Updated'
+        );
+
+        setCode(newCode);
+      }
+    );
+
+    socket.on(
+      'code_result',
+      result => {
+
+        console.log(
+          'Execution Result:',
+          result
+        );
+
+        setOutput(
+          result.output
+        );
+
+        setStatus(
+          result.status === 'success'
+            ? 'Execution Finished'
+            : `Error: ${result.status}`
+        );
+      }
+    );
+
+    socket.on(
+      'disconnect',
+      () => {
+
+        console.log(
+          '🔴 Disconnected'
+        );
+      }
+    );
 
     return () => {
-      socketRef.current?.off('code_update');
-      socketRef.current?.off('code_result');
-      socketRef.current?.disconnect();
+
+      socket.off('connect');
+      socket.off('joined');
+      socket.off('code_update');
+      socket.off('code_result');
+      socket.off('disconnect');
+
+      socket.disconnect();
     };
+
   }, [roomId]);
 
-  const handleEditorChange = (value: string | undefined) => {
-    if (value === undefined) return;
+  /* ============================
+     Editor Change
+  ============================ */
+
+  const handleEditorChange = (
+    value: string | undefined
+  ) => {
+
+    if (!value) return;
+
     setCode(value);
-    if (socketRef.current && roomId) {
-      socketRef.current?.emit('code_change', { roomId, code: value });
-    }
+
+    socketRef.current?.emit(
+      'code_change',
+      {
+        roomId,
+        code: value
+      }
+    );
   };
 
+  /* ============================
+     Save
+  ============================ */
+
   const saveCode = async () => {
+
     if (!roomId) return;
+
     setSaving(true);
+
     try {
-      await axios.post('https://collaborativecoderapi.onrender.com/save', {
-        roomId,
-        code,
-        language
-      });
-    } catch (e) {
-      console.error('Save failed:', e);
+
+      await axios.post(
+        `${API_URL}/save`,
+        {
+          roomId,
+          code,
+          language
+        }
+      );
+
+    } catch(err){
+
+      console.error(
+        'Save failed:',
+        err
+      );
+
     } finally {
+
       setSaving(false);
     }
   };
 
+  /* ============================
+     Run
+  ============================ */
+
   const runCode = async () => {
+
     if (!roomId) return;
 
-    setStatus('Running...');
+    setStatus(
+      'Running...'
+    );
+
     setOutput('');
 
     try {
+
       await saveCode();
-      await axios.post('https://collaborativecoderapi.onrender.com/submit', {
-        roomId,
-        sourceCode: code,
-        language: language,
-        input: userInput
-      });
-    } catch (error) {
-      console.error(error);
-      setStatus('Error sending code');
-      setOutput('Failed to execute code. Please try again.');
+
+      await axios.post(
+        `${API_URL}/submit`,
+        {
+          roomId,
+          sourceCode: code,
+          language,
+          input: userInput
+        }
+      );
+
+    } catch(err){
+
+      console.error(err);
+
+      setStatus(
+        'Execution Failed'
+      );
+
+      setOutput(
+        'Could not execute code'
+      );
     }
   };
+
+  /* ============================
+     Copy Room
+  ============================ */
 
   const copyRoomId = () => {
-    if (roomId) {
-      navigator.clipboard.writeText(roomId);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  };
 
-  const getEditorLanguage = () => {
-    if (language === 'cpp') return 'cpp';
-    return language;
+    if (!roomId) return;
+
+    navigator.clipboard.writeText(
+      roomId
+    );
+
+    setCopied(true);
+
+    setTimeout(
+      ()=>setCopied(false),
+      2000
+    );
   };
 
   return (
     <div className="h-screen flex flex-col bg-slate-900">
-      <nav className="bg-slate-800 border-b border-slate-700 px-4 h-14 flex items-center justify-between flex-shrink-0">
+
+      {/* Navbar */}
+
+      <nav className="bg-slate-800 border-b border-slate-700 px-4 h-14 flex items-center justify-between">
+
         <div className="flex items-center gap-4">
+
           <button
-            onClick={() => navigate('/')}
-            className="flex items-center gap-2 text-slate-300 hover:text-white transition-colors"
+            onClick={()=>navigate('/')}
           >
-            <Home className="w-5 h-5" />
+            <Home className="w-5 h-5 text-slate-300"/>
           </button>
 
-          <div className="h-6 w-px bg-slate-700" />
-
           <div className="flex items-center gap-2">
-            <Code2 className="w-5 h-5 text-blue-400" />
-            <span className="text-sm font-medium text-slate-300">Room:</span>
-            <code className="text-xs font-mono text-slate-400 bg-slate-700 px-2 py-1 rounded">
-              {roomId?.substring(0, 8)}...
+
+            <Code2 className="w-5 h-5 text-blue-400"/>
+
+            <span className="text-white">
+              Room:
+            </span>
+
+            <code className="bg-slate-700 px-2 py-1 rounded">
+
+              {roomId?.substring(0,8)}...
+
             </code>
+
             <button
               onClick={copyRoomId}
-              className="p-1.5 hover:bg-slate-700 rounded transition-colors"
-              title="Copy Room ID"
             >
-              {copied ? (
-                <Check className="w-4 h-4 text-green-400" />
-              ) : (
-                <Copy className="w-4 h-4 text-slate-400" />
-              )}
+              {copied
+                ? <Check/>
+                : <Copy/>
+              }
             </button>
+
           </div>
+
         </div>
 
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 bg-slate-700 rounded-lg px-3 py-1.5">
-            <Settings className="w-4 h-4 text-slate-400" />
-            <select
-              value={language}
-              onChange={(e) => setLanguage(e.target.value)}
-              className="bg-transparent text-sm text-slate-200 outline-none cursor-pointer"
-            >
-              <option value="python">Python</option>
-              <option value="cpp">C++</option>
-            </select>
-          </div>
+        <div className="flex gap-3">
+
+          <select
+            value={language}
+            onChange={(e)=>
+              setLanguage(
+                e.target.value
+              )
+            }
+          >
+            <option value="python">
+              Python
+            </option>
+
+            <option value="cpp">
+              C++
+            </option>
+          </select>
 
           <button
             onClick={saveCode}
-            disabled={saving}
-            className="flex items-center gap-2 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg transition-colors text-sm disabled:opacity-50"
           >
-            {saving ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Save className="w-4 h-4" />
-            )}
-            Save
+            {saving
+              ? 'Saving...'
+              : 'Save'}
           </button>
 
           <button
             onClick={runCode}
-            disabled={status === 'Running...'}
-            className="flex items-center gap-2 px-4 py-1.5 bg-green-600 hover:bg-green-700 disabled:bg-green-800 text-white rounded-lg transition-colors text-sm font-medium disabled:cursor-not-allowed"
           >
-            {status === 'Running...' ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Running...
-              </>
-            ) : (
-              <>
-                <Play className="w-4 h-4" />
-                Run Code
-              </>
-            )}
+            {status==="Running..."
+              ? 'Running...'
+              : 'Run'}
           </button>
+
         </div>
+
       </nav>
 
-      <div className="flex-1 flex overflow-hidden">
-        <div className="flex-1 flex flex-col">
-          <div className="flex-1 overflow-hidden">
-            <MonacoEditor
-              height="100%"
-              language={getEditorLanguage()}
-              theme="vs-dark"
-              value={code}
-              onChange={handleEditorChange}
-              options={{
-                minimap: { enabled: true },
-                fontSize: 14,
-                lineNumbers: 'on',
-                roundedSelection: false,
-                scrollBeyondLastLine: false,
-                automaticLayout: true,
-                tabSize: 2,
-                wordWrap: 'on',
-                padding: { top: 16 }
-              }}
-            />
-          </div>
+      <div className="flex flex-1">
+
+        <div className="flex-1">
+
+          <MonacoEditor
+            height="100%"
+            language={language}
+            theme="vs-dark"
+            value={code}
+            onChange={handleEditorChange}
+          />
+
         </div>
 
-        <div className="w-96 border-l border-slate-700 flex flex-col bg-slate-800">
-          <div className="flex-1 flex flex-col border-b border-slate-700">
-            <div className="px-4 py-3 border-b border-slate-700 flex items-center gap-2">
-              <FileInput className="w-4 h-4 text-slate-400" />
-              <h3 className="text-sm font-semibold text-slate-200">Input (stdin)</h3>
+        <div className="w-96 bg-slate-800 flex flex-col">
+
+          <textarea
+            value={userInput}
+            onChange={e=>
+              setUserInput(
+                e.target.value
+              )
+            }
+            placeholder="stdin input..."
+          />
+
+          <div className="flex-1 p-4">
+
+            <div>
+              {status}
             </div>
-            <textarea
-              value={userInput}
-              onChange={(e) => setUserInput(e.target.value)}
-              className="flex-1 bg-slate-900 text-slate-100 p-4 text-sm font-mono resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset"
-              placeholder="Enter input for your program..."
-            />
+
+            <pre className="text-white whitespace-pre-wrap">
+              {output ||
+                'Waiting for output...'}
+            </pre>
+
           </div>
 
-          <div className="flex-1 flex flex-col">
-            <div className="px-4 py-3 border-b border-slate-700 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Terminal className="w-4 h-4 text-slate-400" />
-                <h3 className="text-sm font-semibold text-slate-200">Output</h3>
-              </div>
-              {status && (
-                <span
-                  className={`text-xs px-2 py-1 rounded ${
-                    status === 'Running...'
-                      ? 'bg-blue-500/20 text-blue-300'
-                      : status === 'Execution Finished'
-                      ? 'bg-green-500/20 text-green-300'
-                      : 'bg-red-500/20 text-red-300'
-                  }`}
-                >
-                  {status}
-                </span>
-              )}
-            </div>
-            <div className="flex-1 overflow-auto bg-slate-900 p-4">
-              {output ? (
-                <pre className="text-sm font-mono text-slate-100 whitespace-pre-wrap break-words">
-                  {output}
-                </pre>
-              ) : (
-                <div className="flex flex-col items-center justify-center h-full text-slate-500">
-                  <Terminal className="w-8 h-8 mb-2 opacity-50" />
-                  <p className="text-sm">Waiting for output...</p>
-                </div>
-              )}
-            </div>
-          </div>
         </div>
+
       </div>
 
-      <div className="bg-slate-800 border-t border-slate-700 px-4 py-2 flex items-center justify-between text-xs text-slate-400 flex-shrink-0">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <Users className="w-3 h-3" />
-            <span>Collaborative Mode</span>
-          </div>
-        </div>
-        <div>
-          Press Ctrl+S to save • Ctrl+Enter to run
-        </div>
-      </div>
     </div>
   );
 }

@@ -16,11 +16,10 @@ import {
   Users,
   Save
 } from 'lucide-react';
-import type { CodeResult, RoomData } from './types';
-
-const socketRef = useRef<Socket | null>(null);
+import type { RoomData } from './types';
 
 function Editor() {
+  const socketRef = useRef<Socket | null>(null);
   const [userInput, setUserInput] = useState('');
   const [code, setCode] = useState("# Write your Python code here\nprint('Hello World')");
   const [output, setOutput] = useState('');
@@ -34,38 +33,38 @@ function Editor() {
   useEffect(() => {
     if (!roomId) return;
 
-    socketRef.current = io();
+    socketRef.current = io('https://collaborativecoderapi.onrender.com');
     const userId = localStorage.getItem('userId');
 
     if (userId) {
-      axios.post('https://collaborativecoderapi.onrender.com/verify-room', { roomId, userId });
+      axios.post('https://collaborativecoderapi.onrender.com/verify-room', { roomId, userId })
+        .catch(err => console.error('Verification failed:', err));
     }
 
     const fetchRoomData = async () => {
       try {
         const response = await axios.get<RoomData>(`https://collaborativecoderapi.onrender.com/room/${roomId}`);
         if (response.data) {
-          setCode(response.data.code || '');
+          setCode(response.data.code || "# Write your Python code here\nprint('Hello World')");
           setLanguage(response.data.language || 'python');
         }
       } catch (err) {
-        console.error('Failed to load room data');
+        console.error('Failed to load room data:', err);
       }
     };
 
     fetchRoomData();
-      socketRef.current?.emit('join_room', {
+    
+    socketRef.current?.emit('join_room', {
       roomId,
-      username:
-        localStorage.getItem('username')
-        || 'Anonymous'
+      username: localStorage.getItem('username') || 'Anonymous'
     });
 
-      socketRef.current?.on('code_update', (newCode: string) => {
+    socketRef.current?.on('code_update', (newCode: string) => {
       setCode(newCode);
     });
 
-      socketRef.current?.on('code_result', (result: any) => {
+    socketRef.current?.on('code_result', (result: any) => {
       setOutput(result.output);
       setStatus(result.status === 'success' ? 'Execution Finished' : `Error: ${result.status}`);
     });
@@ -95,7 +94,7 @@ function Editor() {
         language
       });
     } catch (e) {
-      console.error('Save failed');
+      console.error('Save failed:', e);
     } finally {
       setSaving(false);
     }

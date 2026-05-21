@@ -29,126 +29,105 @@ function Editor() {
   const [userInput, setUserInput] =
     useState('');
 
-  useEffect(() => {
+useEffect(() => {
 
-    if (!roomId) return;
+  if (!roomId) return;
 
-    const socket = io(API, {
-      transports: ['websocket'],
-      reconnection: true,
-      reconnectionAttempts: Infinity
-    });
+  const socket = io(API, {
+    transports: ['websocket'],
+    reconnection: true,
+    reconnectionAttempts: Infinity
+  });
 
-    socketRef.current = socket;
+  socketRef.current = socket;
 
-    /* ============================
-       Connect
-    ============================ */
+  socket.on('connect', () => {
 
-    socket.on(
-      'connect',
-      () => {
+    console.log(
+      '🟢 Connected:',
+      socket.id
+    );
 
-        console.log(
-          '🟢 Connected:',
-          socket.id
-        );
-
-        socket.emit(
-          'join_room',
-          {
-            roomId,
-            username:
-              localStorage.getItem(
-                'username'
-              ) || 'Anonymous'
-          }
-        );
-
+    socket.emit(
+      'join_room',
+      {
+        roomId,
+        username:
+          localStorage.getItem('username')
+          || 'Anonymous'
       }
     );
 
-    /* ============================
-       Joined
-    ============================ */
+  });
 
-    socket.on(
-      'joined',
-      data => {
+  socket.on(
+    'joined',
+    (data) => {
 
-        console.log(
-          'Joined room:',
-          data
-        );
+      console.log(
+        'Joined room:',
+        data
+      );
 
-      }
-    );
+    }
+  );
 
-    /* ============================
-       Code Sync
-    ============================ */
+  socket.on(
+    'code_update',
+    (newCode) => {
 
-    socket.on(
-      'code_update',
-      newCode => {
+      setCode(newCode);
 
-        setCode(newCode);
+    }
+  );
 
-      }
-    );
+  socket.on(
+    'code_result',
+    (result) => {
 
-    /* ============================
-       Output
-    ============================ */
+      console.log(
+        'RESULT:',
+        result
+      );
 
-    socket.on(
-      'code_result',
-      result => {
+      setOutput(
+        result.output
+      );
 
-        console.log(
-          'RESULT:',
-          result
-        );
+      setStatus(
+        result.status === 'success'
+          ? 'Execution Finished'
+          : result.status
+      );
 
-        setOutput(
-          result.output
-        );
+    }
+  );
 
-        setStatus(
-          result.status === 'success'
-            ? 'Execution Finished'
-            : result.status
-        );
+  socket.on(
+    'disconnect',
+    (reason) => {
 
-      }
-    );
+      console.log(
+        '🔴 Disconnected:',
+        reason
+      );
 
-    socket.on(
-      'disconnect',
-      reason => {
+    }
+  );
 
-        console.log(
-          '🔴 Disconnected:',
-          reason
-        );
+  return () => {
 
-      }
-    );
+    socket.off('connect');
+    socket.off('joined');
+    socket.off('code_update');
+    socket.off('code_result');
+    socket.off('disconnect');
 
-    return () => {
+    socket.disconnect();
 
-      socket.off('connect');
-      socket.off('joined');
-      socket.off('code_update');
-      socket.off('code_result');
-      socket.off('disconnect');
+  };
 
-      socket.disconnect();
-
-    };
-
-  }, [roomId]);
-
+}, [roomId]);
   /* ============================
      Run Code
   ============================ */

@@ -33,26 +33,25 @@ useEffect(()=>{
 
 if(!roomId)return;
 
-const socket=io(
-API,
-{
-transports:['websocket'],
-reconnection:true,
-reconnectionAttempts:Infinity,
-timeout:20000
-}
+const socket = io(
+  'https://collaborativecoderapi.onrender.com',
+  {
+    transports: ['websocket'],
+    reconnection: true,
+    reconnectionAttempts: Infinity
+  }
 );
 
 socketRef.current=socket;
 
-socket.on(
-'connect',
-()=>{
-
-console.log(
-'Connected:',
-socket.id
-);
+socket.on('connect', () => {
+  socket.emit('join_room', {
+    roomId,
+    username:
+      localStorage.getItem('username')
+      || 'Anonymous'
+  });
+});
 
 socket.emit(
 'join_room',

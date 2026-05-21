@@ -5,7 +5,7 @@ import MonacoEditor from '@monaco-editor/react';
 import { useParams } from 'react-router-dom';
 
 const API =
-'https://collaborativecoderapi.onrender.com';
+  'https://collaborativecoderapi.onrender.com';
 
 function Editor() {
 
@@ -33,14 +33,11 @@ function Editor() {
 
     if (!roomId) return;
 
-    const socket = io(
-      API,
-      {
-        transports: ['websocket'],
-        reconnection: true,
-        reconnectionAttempts: Infinity
-      }
-    );
+    const socket = io(API, {
+      transports: ['websocket'],
+      reconnection: true,
+      reconnectionAttempts: Infinity
+    });
 
     socketRef.current = socket;
 
@@ -95,9 +92,7 @@ function Editor() {
       'code_update',
       newCode => {
 
-        setCode(
-          newCode
-        );
+        setCode(newCode);
 
       }
     );
@@ -142,25 +137,11 @@ function Editor() {
 
     return () => {
 
-      socket.off(
-        'connect'
-      );
-
-      socket.off(
-        'joined'
-      );
-
-      socket.off(
-        'code_update'
-      );
-
-      socket.off(
-        'code_result'
-      );
-
-      socket.off(
-        'disconnect'
-      );
+      socket.off('connect');
+      socket.off('joined');
+      socket.off('code_update');
+      socket.off('code_result');
+      socket.off('disconnect');
 
       socket.disconnect();
 
@@ -173,38 +154,38 @@ function Editor() {
   ============================ */
 
   const runCode =
-  async () => {
+    async () => {
 
-    setOutput('');
-
-    setStatus(
-      'Running...'
-    );
-
-    try {
-
-      await axios.post(
-        `${API}/submit`,
-        {
-          roomId,
-          sourceCode: code,
-          language,
-          input: userInput
-        }
-      );
-
-    }
-    catch (err) {
-
-      console.error(err);
+      setOutput('');
 
       setStatus(
-        'Execution Failed'
+        'Running...'
       );
 
-    }
+      try {
 
-  };
+        await axios.post(
+          `${API}/submit`,
+          {
+            roomId,
+            sourceCode: code,
+            language,
+            input: userInput
+          }
+        );
+
+      }
+      catch (err) {
+
+        console.error(err);
+
+        setStatus(
+          'Execution Failed'
+        );
+
+      }
+
+    };
 
   return (
 
@@ -215,15 +196,18 @@ function Editor() {
         theme="vs-dark"
         language={language}
         value={code}
-        onChange={value => {
+        onChange={(value) => {
 
-          setCode(value);
+          const updatedCode =
+            value || '';
+
+          setCode(updatedCode);
 
           socketRef.current?.emit(
             'code_change',
             {
               roomId,
-              code: value
+              code: updatedCode
             }
           );
 
@@ -232,7 +216,7 @@ function Editor() {
 
       <textarea
         value={userInput}
-        onChange={e =>
+        onChange={(e) =>
           setUserInput(
             e.target.value
           )

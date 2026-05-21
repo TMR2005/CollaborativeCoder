@@ -7,216 +7,260 @@ import { useParams } from 'react-router-dom';
 const API =
 'https://collaborativecoderapi.onrender.com';
 
-function Editor(){
+function Editor() {
 
-const socketRef=useRef(null);
+  const socketRef = useRef(null);
 
-const {roomId}=useParams();
+  const { roomId } = useParams();
 
-const [code,setCode]=useState(
-`print("Hello World")`
-);
+  const [code, setCode] = useState(
+    `print("Hello World")`
+  );
 
-const [output,setOutput]=
-useState('');
+  const [output, setOutput] =
+    useState('');
 
-const [status,setStatus]=
-useState('');
+  const [status, setStatus] =
+    useState('');
 
-const [language,setLanguage]=
-useState('python');
+  const [language, setLanguage] =
+    useState('python');
 
-const [userInput,setUserInput]=
-useState('');
+  const [userInput, setUserInput] =
+    useState('');
 
-useEffect(()=>{
+  useEffect(() => {
 
-if(!roomId)return;
+    if (!roomId) return;
 
-const socket = io(
-  'https://collaborativecoderapi.onrender.com',
-  {
-    transports: ['websocket'],
-    reconnection: true,
-    reconnectionAttempts: Infinity
-  }
-);
+    const socket = io(
+      API,
+      {
+        transports: ['websocket'],
+        reconnection: true,
+        reconnectionAttempts: Infinity
+      }
+    );
 
-socketRef.current=socket;
+    socketRef.current = socket;
 
-socket.on('connect', () => {
-  socket.emit('join_room', {
-    roomId,
-    username:
-      localStorage.getItem('username')
-      || 'Anonymous'
-  });
-});
+    /* ============================
+       Connect
+    ============================ */
 
-socket.emit(
-'join_room',
-{
-roomId,
-username:
-localStorage.getItem(
-'username'
-)
-||
-'Anonymous'
-}
-);
+    socket.on(
+      'connect',
+      () => {
 
-}
-);
+        console.log(
+          '🟢 Connected:',
+          socket.id
+        );
 
-socket.on(
-'code_update',
-newCode=>{
+        socket.emit(
+          'join_room',
+          {
+            roomId,
+            username:
+              localStorage.getItem(
+                'username'
+              ) || 'Anonymous'
+          }
+        );
 
-setCode(
-newCode
-);
+      }
+    );
 
-}
-);
+    /* ============================
+       Joined
+    ============================ */
 
-socket.on(
-'code_result',
-result=>{
+    socket.on(
+      'joined',
+      data => {
 
-console.log(
-'RESULT:',
-result
-);
+        console.log(
+          'Joined room:',
+          data
+        );
 
-setOutput(
-result.output
-);
+      }
+    );
 
-setStatus(
-result.status==='success'
-?
-'Execution Finished'
-:
-result.status
-);
+    /* ============================
+       Code Sync
+    ============================ */
 
-}
-);
+    socket.on(
+      'code_update',
+      newCode => {
 
-return ()=>{
+        setCode(
+          newCode
+        );
 
-socket.off(
-'connect'
-);
+      }
+    );
 
-socket.off(
-'code_update'
-);
+    /* ============================
+       Output
+    ============================ */
 
-socket.off(
-'code_result'
-);
+    socket.on(
+      'code_result',
+      result => {
 
-socket.disconnect();
+        console.log(
+          'RESULT:',
+          result
+        );
 
-};
+        setOutput(
+          result.output
+        );
 
-},[roomId]);
+        setStatus(
+          result.status === 'success'
+            ? 'Execution Finished'
+            : result.status
+        );
 
-const runCode=
-async()=>{
+      }
+    );
 
-setOutput('');
+    socket.on(
+      'disconnect',
+      reason => {
 
-setStatus(
-'Running...'
-);
+        console.log(
+          '🔴 Disconnected:',
+          reason
+        );
 
-try{
+      }
+    );
 
-await axios.post(
-`${API}/submit`,
-{
-roomId,
-sourceCode:
-code,
-language,
-input:
-userInput
-}
-);
+    return () => {
 
-}
-catch(err){
+      socket.off(
+        'connect'
+      );
 
-console.error(err);
+      socket.off(
+        'joined'
+      );
 
-setStatus(
-'Execution Failed'
-);
+      socket.off(
+        'code_update'
+      );
 
-}
+      socket.off(
+        'code_result'
+      );
 
-};
+      socket.off(
+        'disconnect'
+      );
 
-return(
+      socket.disconnect();
 
-<div>
+    };
 
-<MonacoEditor
-height="70vh"
-theme="vs-dark"
-language={language}
-value={code}
-onChange={value=>{
+  }, [roomId]);
 
-setCode(value);
+  /* ============================
+     Run Code
+  ============================ */
 
-socketRef.current?.
-emit(
-'code_change',
-{
-roomId,
-code:value
-}
-);
+  const runCode =
+  async () => {
 
-}}
-/>
+    setOutput('');
 
-<textarea
-value={userInput}
-onChange={e=>
-setUserInput(
-e.target.value
-)
-}
-/>
+    setStatus(
+      'Running...'
+    );
 
-<button
-onClick={
-runCode
-}
->
-Run
-</button>
+    try {
 
-<div>
+      await axios.post(
+        `${API}/submit`,
+        {
+          roomId,
+          sourceCode: code,
+          language,
+          input: userInput
+        }
+      );
 
-<h3>
-{status}
-</h3>
+    }
+    catch (err) {
 
-<pre>
-{output}
-</pre>
+      console.error(err);
 
-</div>
+      setStatus(
+        'Execution Failed'
+      );
 
-</div>
+    }
 
-);
+  };
+
+  return (
+
+    <div>
+
+      <MonacoEditor
+        height="70vh"
+        theme="vs-dark"
+        language={language}
+        value={code}
+        onChange={value => {
+
+          setCode(value);
+
+          socketRef.current?.emit(
+            'code_change',
+            {
+              roomId,
+              code: value
+            }
+          );
+
+        }}
+      />
+
+      <textarea
+        value={userInput}
+        onChange={e =>
+          setUserInput(
+            e.target.value
+          )
+        }
+      />
+
+      <button
+        onClick={runCode}
+      >
+        Run
+      </button>
+
+      <div>
+
+        <h3>
+          {status}
+        </h3>
+
+        <pre>
+          {output ||
+            'Waiting for output...'}
+        </pre>
+
+      </div>
+
+    </div>
+
+  );
 
 }
 
